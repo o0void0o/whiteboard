@@ -1,240 +1,212 @@
-import { Tldraw } from 'tldraw'
-import { useState } from 'react'
+import { useState, useRef } from 'react'
+import { Tldraw, loadSnapshot, getSnapshot } from 'tldraw'
 import 'tldraw/tldraw.css'
 
 export default function App() {
-  const [editor, setEditor] = useState(null)
-
-  const handleMount = (editorInstance) => {
-    setEditor(editorInstance)
-  }
-
-  const exportToFile = async () => {
-    if (!editor) return
-    
-    try {
-      // Get the complete snapshot of the store (all pages, shapes, etc.)
-      const snapshot = editor.store.getSnapshot()
-      
-      // Get all assets (images, etc.) as base64
-      const assets = {}
-      const assetRecords = Object.values(snapshot.store).filter(record => record.typeName === 'asset')
-      
-      for (const asset of assetRecords) {
-        if (asset.type === 'image' && asset.props.src) {
-          try {
-            // Convert image to base64 if it's not already
-            if (!asset.props.src.startsWith('data:')) {
-              const response = await fetch(asset.props.src)
-              const blob = await response.blob()
-              const reader = new FileReader()
-              const base64 = await new Promise((resolve) => {
-                reader.onload = () => resolve(reader.result)
-                reader.readAsDataURL(blob)
-              })
-              assets[asset.id] = base64
-            } else {
-              assets[asset.id] = asset.props.src
-            }
-          } catch (error) {
-            console.warn('Failed to export asset:', asset.id, error)
-          }
-        }
-      }
-      
-      // Create export data with assets
-      const exportData = {
-        snapshot,
-        assets,
-        exportedAt: new Date().toISOString(),
-        version: '1.0'
-      }
-      
-      // Create a downloadable file
-      const dataStr = JSON.stringify(exportData, null, 2)
-      const dataBlob = new Blob([dataStr], { type: 'application/json' })
-      
-      // Create download link
-      const url = URL.createObjectURL(dataBlob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `tldraw-export-${new Date().toISOString().split('T')[0]}.json`
-      
-      // Trigger download
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      
-      // Cleanup
-      URL.revokeObjectURL(url)
-      
-      console.log('Export successful!')
-    } catch (error) {
-      console.error('Export failed:', error)
-      alert('Export failed. Check console for details.')
-    }
-  }
-
-  const importFromFile = () => {
-    if (!editor) return
-    
-    // Create file input
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.accept = '.json'
-    
-    input.onchange = async (e) => {
-      const file = e.target.files[0]
-      if (!file) return
-      
-      try {
-        const text = await file.text()
-        const importData = JSON.parse(text)
-        
-        // Handle both old format (direct snapshot) and new format (with assets)
-        let snapshot, assets = {}
-        
-        if (importData.snapshot) {
-          // New format with assets
-          snapshot = importData.snapshot
-          assets = importData.assets || {}
-        } else if (importData.store && importData.schema) {
-          // Old format (direct snapshot)
-          snapshot = importData
-        } else {
-          alert('Invalid tldraw file format')
-          return
-        }
-        
-        // Simple approach: use the built-in loadSnapshot method
-        // This preserves the editor state properly
-        editor.store.loadSnapshot(snapshot)
-        
-        // Restore assets after loading
-        for (const [assetId, base64Data] of Object.entries(assets)) {
-          try {
-            const assetRecord = editor.getAsset(assetId)
-            if (assetRecord && assetRecord.type === 'image') {
-              editor.updateAsset({
-                ...assetRecord,
-                props: {
-                  ...assetRecord.props,
-                  src: base64Data
-                }
-              })
-            }
-          } catch (error) {
-            console.warn('Could not restore asset:', assetId, error)
-          }
-        }
-        
-        // Wait a bit then zoom to fit
-        setTimeout(() => {
-          try {
-            editor.zoomToFit({ animation: { duration: 500 } })
-          } catch (error) {
-            console.warn('Could not zoom to fit:', error)
-          }
-        }, 200)
-        
-        console.log('Import successful!')
-      } catch (error) {
-        console.error('Import failed:', error)
-        alert('Import failed. Make sure the file is a valid tldraw export.')
-      }
-    }
-    
-    input.click()
-  }
-
-  const clearCanvas = () => {
-    if (!editor) return
-    
-    if (confirm('Are you sure you want to clear everything? This cannot be undone.')) {
-      editor.selectAll()
-      editor.deleteShapes(editor.getSelectedShapeIds())
-      // Also clear all pages except the current one
-      const pages = editor.getPages()
-      const currentPageId = editor.getCurrentPageId()
-      pages.forEach(page => {
-        if (page.id !== currentPageId) {
-          editor.deletePage(page.id)
-        }
-      })
-    }
-  }
-
   return (
     <div style={{ position: 'fixed', inset: 0 }}>
-      {/* Control buttons - positioned to avoid overlapping with tldraw's UI */}
-      <div style={{
-        position: 'absolute',
-        top: 80,
-        right: 10,
-        zIndex: 1000,
-        display: 'flex',
-        gap: '8px',
-        flexDirection: 'column'
-      }}>
-        <button
-          onClick={exportToFile}
-          disabled={!editor}
-          style={{
-            padding: '8px 12px',
-            backgroundColor: '#007acc',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: editor ? 'pointer' : 'not-allowed',
-            fontSize: '12px',
-            fontWeight: '500',
-            minWidth: '80px'
-          }}
-        >
-          Export All
-        </button>
-        
-        <button
-          onClick={importFromFile}
-          disabled={!editor}
-          style={{
-            padding: '8px 12px',
-            backgroundColor: '#28a745',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: editor ? 'pointer' : 'not-allowed',
-            fontSize: '12px',
-            fontWeight: '500',
-            minWidth: '80px'
-          }}
-        >
-          Import File
-        </button>
-        
-        <button
-          onClick={clearCanvas}
-          disabled={!editor}
-          style={{
-            padding: '8px 12px',
-            backgroundColor: '#dc3545',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: editor ? 'pointer' : 'not-allowed',
-            fontSize: '12px',
-            fontWeight: '500',
-            minWidth: '80px'
-          }}
-        >
-          Clear All
-        </button>
-      </div>
-
-      <Tldraw 
-        persistenceKey="my-tldraw-app"
-        onMount={handleMount}
-      />
+      <FileSnapshotDemo />
     </div>
   )
 }
+
+// Enhanced snapshot functionality that saves to file including images
+function FileSnapshotDemo() {
+  const [editor, setEditor] = useState(null);
+  const fileInputRef = useRef(null);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  
+  return (
+    <div style={{ height: '100%', position: 'relative' }}>
+      {/* Floating action button - now at bottom right */}
+      <div 
+        style={{
+          position: 'absolute',
+          bottom: '20px',
+          right: '20px',
+          zIndex: 100,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'flex-end',
+          gap: '8px'
+        }}
+      >
+        {/* Dropdown menu - now appears above the button */}
+        {isMenuOpen && (
+          <div 
+            style={{
+              backgroundColor: 'white',
+              borderRadius: '4px',
+              boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
+              overflow: 'hidden',
+              width: '160px',
+              marginBottom: '8px'
+            }}
+          >
+            <div 
+              onClick={() => {
+                handleSaveToFile(editor);
+                setIsMenuOpen(false);
+              }}
+              style={{
+                padding: '10px',
+                cursor: editor ? 'pointer' : 'not-allowed',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                opacity: editor ? 1 : 0.5,
+                borderBottom: '1px solid #eee',
+                color: '#333',  // Dark text for contrast
+                backgroundColor: 'white',
+                transition: 'background-color 0.2s',
+                ':hover': { backgroundColor: '#f5f5f5' }
+              }}
+              title="Save whiteboard to a file"
+              onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f5f5f5'}
+              onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'white'}
+            >
+              <span style={{ fontSize: '16px' }}>💾</span>
+              <span style={{ fontWeight: '500' }}>Save to File</span>
+            </div>
+            
+            <div 
+              onClick={() => {
+                if (editor && fileInputRef.current) {
+                  fileInputRef.current.click();
+                  setIsMenuOpen(false);
+                }
+              }}
+              style={{
+                padding: '10px',
+                cursor: editor ? 'pointer' : 'not-allowed',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                opacity: editor ? 1 : 0.5,
+                color: '#333',  // Dark text for contrast
+                backgroundColor: 'white',
+                transition: 'background-color 0.2s'
+              }}
+              title="Load whiteboard from a file"
+              onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f5f5f5'}
+              onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'white'}
+            >
+              <span style={{ fontSize: '16px' }}>📂</span>
+              <span style={{ fontWeight: '500' }}>Load from File</span>
+            </div>
+          </div>
+        )}
+        
+        {/* Menu button */}
+        <button
+          onClick={() => setIsMenuOpen(!isMenuOpen)}
+          style={{
+            width: '48px',
+            height: '48px',
+            borderRadius: '50%',
+            backgroundColor: '#2563eb', // Updated to a nice blue color
+            color: 'white',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            border: 'none',
+            cursor: 'pointer',
+            boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
+            fontSize: '20px'
+          }}
+          title="File Options"
+        >
+          {isMenuOpen ? "×" : "⋮"}
+        </button>
+      </div>
+      
+      {/* Hidden file input */}
+      <input 
+        type="file" 
+        ref={fileInputRef}
+        style={{ display: 'none' }} 
+        accept=".tldr" 
+        onChange={(e) => handleFileUpload(e, editor)} 
+      />
+      
+      {/* Main editor area */}
+      <Tldraw onMount={setEditor} />
+    </div>
+  )
+}
+
+// Function to handle saving the whiteboard to a file
+const handleSaveToFile = async (editor) => {
+  if (!editor) return;
+
+  try {
+    // Get the complete snapshot including assets
+    const snapshot = getSnapshot(editor.store);
+    
+    // Convert the snapshot to a JSON string
+    const jsonString = JSON.stringify(snapshot);
+    
+    // Create a blob with the JSON data
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    
+    // Create a URL for the blob
+    const url = URL.createObjectURL(blob);
+    
+    // Create a temporary anchor element to trigger the download
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `whiteboard-snapshot-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.tldr`;
+    document.body.appendChild(a);
+    a.click();
+    
+    // Clean up
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    console.log('Snapshot saved to file successfully');
+  } catch (error) {
+    console.error('Error saving snapshot to file:', error);
+    alert('Failed to save snapshot to file.');
+  }
+};
+
+// Function to handle file upload and loading the snapshot
+const handleFileUpload = async (event, editor) => {
+  if (!editor || !event.target.files || event.target.files.length === 0) return;
+  
+  const file = event.target.files[0];
+  const reader = new FileReader();
+  
+  reader.onload = async (e) => {
+    try {
+      // Parse the JSON data from the file
+      const snapshot = JSON.parse(e.target.result);
+      
+      // Reset the tool to select before loading the snapshot
+      editor.setCurrentTool('select');
+      
+      // Load the snapshot into the editor
+      loadSnapshot(editor.store, snapshot);
+      
+      console.log('Snapshot loaded from file successfully');
+      
+      // Reset the file input
+      event.target.value = '';
+    } catch (error) {
+      console.error('Error loading snapshot from file:', error);
+      alert('Failed to load snapshot from file. The file may be corrupted or in an invalid format.');
+      // Reset the file input
+      event.target.value = '';
+    }
+  };
+  
+  reader.onerror = () => {
+    console.error('Error reading file');
+    alert('Error reading file');
+    // Reset the file input
+    event.target.value = '';
+  };
+  
+  // Read the file as text
+  reader.readAsText(file);
+};
