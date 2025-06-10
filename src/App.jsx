@@ -94,6 +94,32 @@ function FileSnapshotDemo() {
               <span style={{ fontSize: '16px' }}>📂</span>
               <span style={{ fontWeight: '500' }}>Load from File</span>
             </div>
+
+            <div 
+              onClick={() => {
+                if (editor && confirm('This will clear your current whiteboard. Continue?')) {
+                  editor.store.clear();
+                  setIsMenuOpen(false);
+                }
+              }}
+              style={{
+                padding: '10px',
+                cursor: editor ? 'pointer' : 'not-allowed',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                opacity: editor ? 1 : 0.5,
+                color: '#d32f2f',
+                backgroundColor: 'white',
+                transition: 'background-color 0.2s'
+              }}
+              title="Clear whiteboard"
+              onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#fff5f5'}
+              onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'white'}
+            >
+              <span style={{ fontSize: '16px' }}>🗑️</span>
+              <span style={{ fontWeight: '500' }}>Clear All</span>
+            </div>
           </div>
         )}
         
@@ -129,8 +155,11 @@ function FileSnapshotDemo() {
         onChange={(e) => handleFileUpload(e, editor)} 
       />
       
-      {/* Main editor area */}
-      <Tldraw onMount={setEditor} />
+      {/* Main editor area with built-in persistence */}
+      <Tldraw 
+        persistenceKey="whiteboard-persistence" 
+        onMount={setEditor}
+      />
     </div>
   )
 }
